@@ -5,7 +5,7 @@ const ytSearch = require("yt-search");
 
 module.exports.config = {
     name: "music",
-    version: "2.0.4",
+    version: "2.0.5",
     hasPermssion: 0,
     credits: "Shaan Khan",
     description: "Download Audio or Video",
@@ -72,7 +72,6 @@ module.exports.run = async function ({ api, event, args }) {
         const data = response.data.data;
         if (!data || !data.downloadUrl) throw new Error("Download link not found.");
 
-        // Yahan se Duration wala line hata diya gaya hai
         const infoMsg = `🖤 𝗧𝗶𝘁𝗹𝗲: ${video.title}\n\n👤 𝗔𝗿𝘁𝗶𝘀𝘁: ${video.author.name}\n\n»»𝑶𝑾𝑵𝑬𝑹««★™ »»𝑺𝑯𝑨𝑨𝑵 𝑲𝑯𝑨𝑵««\n🥀𝒀𝑬 𝑳𝑶 𝑩𝑨𝑩𝒀 𝑨𝑷𝑲𝑰     👉 ${isVideo ? "VIDEO" : "SONG"}`;
 
         const writer = fs.createWriteStream(cachePath);
@@ -94,17 +93,29 @@ module.exports.run = async function ({ api, event, args }) {
                 return api.sendMessage(`⚠️ File size (${fileSizeInMB.toFixed(2)}MB) is too large.`, threadID);
             }
 
-            // Title details bhejna (Fresh message, no reply)
-            await api.sendMessage(infoMsg, threadID);
-
-            // File bhejna (Fresh message, no reply)
-            api.sendMessage({
-                attachment: fs.createReadStream(cachePath)
-            }, threadID, (err) => {
-                if (!err) api.setMessageReaction("✅", messageID, (err) => {}, true);
-                if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath);
-                if (processingMsg) api.unsendMessage(processingMsg.messageID);
-            });
+            // Logic: Audio ke liye alag text, Video ke liye sath mein text
+            if (isVideo) {
+                // Video ke liye title ke saath send karein
+                api.sendMessage({
+                    body: infoMsg,
+                    attachment: fs.createReadStream(cachePath)
+                }, threadID, (err) => {
+                    if (!err) api.setMessageReaction("✅", messageID, (err) => {}, true);
+                    if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath);
+                    if (processingMsg) api.unsendMessage(processingMsg.messageID);
+                });
+            } else {
+                // Audio ke liye pehle details (No Reply)
+                await api.sendMessage(infoMsg, threadID);
+                // Phir audio file (No Reply)
+                api.sendMessage({
+                    attachment: fs.createReadStream(cachePath)
+                }, threadID, (err) => {
+                    if (!err) api.setMessageReaction("✅", messageID, (err) => {}, true);
+                    if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath);
+                    if (processingMsg) api.unsendMessage(processingMsg.messageID);
+                });
+            }
         });
 
     } catch (error) {
