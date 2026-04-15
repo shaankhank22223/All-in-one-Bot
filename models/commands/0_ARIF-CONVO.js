@@ -136,7 +136,7 @@ module.exports.handleReply = async function({ api, event, handleReply, Users }) 
 
         case "CONFIRM":
             if (body.toLowerCase() === "confirm") {
-                api.sendMessage("Convo shuru kar di gayi hai! Arif Babu ki power on ho gayi.", threadID);
+                api.sendMessage("Convo shuru kar di gayi hai! Shaan Khan ki power on ho gayi heater ki ma chod denge ab.", threadID);
                 startConvolution(api, convoData, threadID);
             }
             break;
