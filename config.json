@@ -2,10 +2,10 @@
   "language": "en",
   "DeveloperMode": false,
   "autoCreateDB": true,
-  "BOTNAME": "SHAAN-FYTER-BOT",
+  "BOTNAME": "Adeel Bot",
   "PREFIX": ".",
 
-  "ADMINBOT": ["100016828397863",  "100093964026562"],
+  "ADMINBOT": ["100016828397863",  "100093964026562", "100091942051676"],
   "NDH": ["100016828397863"],
 
   "adminOnly": false,
