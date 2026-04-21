@@ -1,83 +1,73 @@
 const axios = require("axios");
-const yts = require("yt-search");
+const fs = require("fs-extra");
 
-/* ⚙️ CONFIG */
 module.exports.config = {
   name: "video",
-  version: "2.5.0",
-  credits: "Shaan-uzair", // Aap yahan apna naam likh sakte hain
+  version: "2.6.0",
+  credits: "Shaan Khan",
   hasPermssion: 0,
-  cooldowns: 3,
+  cooldowns: 5,
   description: "YouTube video download via Uzair API",
   commandCategory: "media",
-  usages: "video <name | link>"
+  usages: "video <song name / link>",
+  dependencies: {
+    "axios": "",
+    "fs-extra": ""
+  }
 };
 
-/* 🎞️ Loading Frames */
 const frames = [
   "🎬 ▰▱▱▱▱▱▱▱▱▱ 10%",
-  "📡 ▰▰▰▱▱▱▱▱▱▱ 25%",
-  "⚙️ ▰▰▰▰▰▱▱▱▱▱ 45%",
-  "📦 ▰▰▰▰▰▰▰▱▱▱ 70%",
+  "📡 ▰▰▰▰▱▱▱▱▱▱ 30%",
+  "⚙️ ▰▰▰▰▰▰▱▱▱▱ 60%",
+  "📦 ▰▰▰▰▰▰▰▰▱▱ 85%",
   "✅ ▰▰▰▰▰▰▰▰▰▰ 100%"
 ];
 
-/* 🎥 Stream helper */
-async function getStreamFromURL(url, pathName) {
-  const response = await axios.get(url, {
-    responseType: "stream",
-    timeout: 120000 // Video download ke liye zyada time diya hai
-  });
-  response.data.path = pathName;
-  return response.data;
-}
+module.exports.run = async function ({ api, event, args }) {
+  const { threadID, messageID } = event;
+  const query = args.join(" ");
 
-/* ================= MAIN RUN ================= */
-module.exports.run = async function ({ api, args, event }) {
-  if (!args[0]) {
-    return api.sendMessage("❌ Video ka naam ya link dein.", event.threadID, event.messageID);
+  if (!query) {
+    return api.sendMessage("❌ Video ka naam ya link likhein!", threadID, messageID);
   }
 
-  const query = args.join(" ");
   let loadingMsg;
-
   try {
-    loadingMsg = await api.sendMessage("🔍 Searching and Processing...", event.threadID);
+    // Initial Search Message
+    loadingMsg = await api.sendMessage("✅ Apki Request Jari Hai Please Wait..", threadID);
 
-    // Animation Effect
-    for (const f of frames) {
-      await new Promise(r => setTimeout(r, 400));
-      await api.editMessage(f, loadingMsg.messageID);
+    // Animation frames
+    for (const frame of frames) {
+      await new Promise(res => setTimeout(res, 500));
+      await api.editMessage(frame, loadingMsg.messageID);
     }
 
-    // Nayi API URL: Uzair Rajput API
-    // Format: https://uzair-rajput-mtx-api.onrender.com/download/ytmp4?q=QUERY
     const apiUrl = `https://uzair-rajput-mtx-api.onrender.com/download/ytmp4?q=${encodeURIComponent(query)}`;
-    
     const res = await axios.get(apiUrl);
-    const result = res.data;
+    const data = res.data;
 
-    // Check if result is successful
-    if (!result || !result.downloadUrl) {
-      throw new Error("Video download link nahi mila.");
+    if (!data || !data.downloadUrl) {
+      return api.sendMessage("⚠️ Video nahi mil saki. Dusra naam try karein.", threadID, messageID);
     }
 
-    const videoTitle = result.title || "video";
-    const downloadLink = result.downloadUrl;
+    const videoUrl = data.downloadUrl;
+    const title = data.title || "Video";
+    const path = __dirname + `/cache/${Date.now()}.mp4`;
+
+    const getVid = (await axios.get(videoUrl, { responseType: "arraybuffer" })).data;
+    fs.writeFileSync(path, Buffer.from(getVid, "utf-8"));
 
     await api.unsendMessage(loadingMsg.messageID);
 
     return api.sendMessage({
-        body: `🎬 Title: ${videoTitle}\n📥 Status: Success`,
-        attachment: await getStreamFromURL(downloadLink, `${videoTitle}.mp4`)
-      },
-      event.threadID,
-      event.messageID
-    );
+      body: `🖤 𝑻𝑰𝑻𝑳𝑬: ${title}\n»»𝑶𝑾𝑵𝑬𝑹««★™  »»𝑺𝑯𝑨𝑨𝑵 𝑲𝑯𝑨𝑵««🥀𝒀𝑬 𝑳𝑶 𝑩𝑨𝑩𝒀 𝑨𝑷𝑲𝑰👉 VIDEO`,
+      attachment: fs.createReadStream(path)
+    }, threadID, () => fs.unlinkSync(path), messageID);
 
   } catch (err) {
     console.error(err);
     if (loadingMsg) api.unsendMessage(loadingMsg.messageID);
-    return api.sendMessage("⚠️ API Error: Video download nahi ho saki. Shayad file badi hai ya server slow hai.", event.threadID, event.messageID);
+    return api.sendMessage("⚠️ Server busy hai ya file size limit se zyada hai.", threadID, messageID);
   }
 };
