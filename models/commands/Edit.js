@@ -1,11 +1,11 @@
 module.exports.config = {
-    name: "edit",
-    version: "1.3.0",
+    name: "gen",
+    version: "1.4.0",
     hasPermssion: 0,
     credits: "Shaan",
-    description: "Render API fix for Image Editing",
+    description: "Render API se image generate karein",
     commandCategory: "Media",
-    usages: "[prompt] - Reply to an image",
+    usages: "[prompt]",
     prefix: false,
     cooldowns: 5
 };
@@ -15,52 +15,45 @@ module.exports.run = async ({ api, event, args }) => {
     const fs = require("fs-extra");
     const path = require("path");
 
-    const { threadID, messageID, messageReply, type } = event;
+    const { threadID, messageID } = event;
 
-    // 1. Validation
-    if (type !== "message_reply" || !messageReply.attachments || messageReply.attachments[0].type !== "photo") {
-        return api.sendMessage("⚠️ Please reply to an image with your edit prompt!", threadID, messageID);
-    }
-
+    // 1. Prompt check
     const prompt = args.join(" ");
-    if (!prompt) return api.sendMessage("❌ Prompt missing!", threadID, messageID);
+    if (!prompt) return api.sendMessage("❌ Please provide a prompt! Example: gen a red car", threadID, messageID);
 
-    const imageUrl = messageReply.attachments[0].url;
-    const cachePath = path.join(__dirname, "cache", `edited_${Date.now()}.png`);
-
-    const processingMsg = await api.sendMessage("🎨 AI is working on your request...", threadID);
+    const cachePath = path.join(__dirname, "cache", `gen_${Date.now()}.png`);
+    const processingMsg = await api.sendMessage("🎨 AI is generating your image...", threadID);
 
     try {
-        // 2. API Endpoint Fix
-        // Note: Check karein agar API endpoint '/gemini' hai ya '/generate'
-        // Maine yahan '/gemini' add kiya hai jo common hota hai
-        const apiUrl = `https://ai-img-gnrte.onrender.com/gemini`; 
-        
+        // 2. Correct Endpoint for Image Generation
+        // Aap niche diye gaye endpoints me se koi bhi use kar sakte hain:
+        const endpoint = "/api/ai/image/dall-e"; 
+        const apiUrl = `https://ai-img-gnrte.onrender.com${endpoint}`;
+
         const res = await axios.get(apiUrl, {
             params: {
-                prompt: prompt,
-                url: imageUrl // Aapka image link yahan ja raha hai
+                prompt: prompt
             }
         });
 
-        // 3. API Response Handle karna
-        // Agar API direct image URL deti hai:
-        const resultUrl = res.data.url || res.data.result || res.data.image;
+        // 3. Response Handling
+        // API aksar { result: "url" } ya direct URL deti hai
+        const resultUrl = res.data.result || res.data.url || res.data.image;
 
         if (!resultUrl) {
-            throw new Error("API did not return an image URL. Response: " + JSON.stringify(res.data));
+            throw new Error("API ne image link nahi diya. Check API response format.");
         }
 
         // 4. Download and Send
         const imgRes = await axios.get(resultUrl, { responseType: "arraybuffer" });
-        if (!fs.existsSync(path.join(__dirname, "cache"))) fs.mkdirSync(path.join(__dirname, "cache"));
         
+        if (!fs.existsSync(path.join(__dirname, "cache"))) fs.mkdirSync(path.join(__dirname, "cache"));
         fs.writeFileSync(cachePath, Buffer.from(imgRes.data, "binary"));
 
         api.unsendMessage(processingMsg.messageID);
 
         return api.sendMessage({
-            body: `✅ Edited successfully!`,
+            body: `✅ Generated: ${prompt}`,
             attachment: fs.createReadStream(cachePath)
         }, threadID, () => fs.unlinkSync(cachePath), messageID);
 
@@ -68,9 +61,8 @@ module.exports.run = async ({ api, event, args }) => {
         console.error(error);
         api.unsendMessage(processingMsg.messageID);
         
-        // 404 Error debugging message
         if (error.response && error.response.status === 404) {
-            return api.sendMessage("❌ Error 404: API Endpoint galat hai. Kya aapne sahi route (e.g. /gemini) set kiya hai?", threadID, messageID);
+            return api.sendMessage("❌ Error 404: Endpoint nahi mila. Server check karein.", threadID, messageID);
         }
         
         return api.sendMessage(`❌ Error: ${error.message}`, threadID, messageID);
