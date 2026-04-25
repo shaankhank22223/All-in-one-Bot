@@ -1,22 +1,20 @@
-const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
-const ytSearch = require("yt-search");
-const https = require("https");
+const axios = require("axios");
 
 module.exports.config = {
-  name: "music", // File name logic ke mutabiq name music kar diya gaya hai
-  version: "3.0.2",
+  name: "music",
+  version: "3.1.0",
   hasPermission: 0,
-  credits: "Shaan Khan", // Credits update kar diye gaye hain
-  description: "Smart music player using Uzair Rajput APIs",
+  credits: "Shaan Khan",
+  description: "Smart music player using YouTube (Uzair Rajput API)",
   usePrefix: false,
   commandCategory: "Music",
   cooldowns: 10
 };
 
 const triggerWords = ["pika", "bot", "shankar"];
-const keywordMatchers = ["gana", "music", "song", "suna", "sunao", "play", "chalao", "lagao", "video"];
+const keywordMatchers = ["gana", "music", "song", "suna", "sunao", "play", "chalao", "lagao"];
 
 module.exports.handleEvent = async function ({ api, event }) {
   let message = event.body?.toLowerCase();
@@ -32,71 +30,75 @@ module.exports.handleEvent = async function ({ api, event }) {
   const keywordIndex = words.findIndex(word => keywordMatchers.includes(word));
   if (keywordIndex === -1 || keywordIndex === words.length - 1) return;
 
-  const isVideo = message.includes("video");
   let possibleSongWords = words.slice(keywordIndex + 1);
-  const songName = possibleSongWords.join(" ").trim();
+  possibleSongWords = possibleSongWords.filter(word => !keywordMatchers.includes(word));
 
+  const songName = possibleSongWords.join(" ").trim();
   if (!songName) return;
-  module.exports.run({ api, event, args: [songName], isVideoRequest: isVideo });
+
+  module.exports.run({ api, event, args: songName.split(" ") });
 };
 
-module.exports.run = async function ({ api, event, args, isVideoRequest }) {
-  const query = args.join(" ");
-  if (!query) return api.sendMessage(`❌ | Please provide a name!`, event.threadID);
-
-  const type = isVideoRequest ? "video" : "audio";
-  const processingMsg = await api.sendMessage(`🔍 | "${query}" khoja ja raha hai...`, event.threadID);
+module.exports.run = async function ({ api, event, args }) {
+  if (!args[0]) return api.sendMessage(`❌ | Kripya ek gaane ka naam darj karein!`, event.threadID);
 
   try {
-    const searchResults = await ytSearch(query);
-    if (!searchResults || !searchResults.videos.length) throw new Error("Result nahi mila.");
+    const query = args.join(" ");
+    const searching = await api.sendMessage(`🔍 | "${query}" YouTube par khoja ja raha hai...`, event.threadID);
 
-    const video = searchResults.videos[0];
-    const videoUrl = video.url;
+    // 1. YouTube Search to get Video URL
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+    const { data: searchData } = await axios.get(searchUrl);
+    const videoIdMatch = searchData.match(/"videoId":"(.*?)"/);
+    
+    if (!videoIdMatch || !videoIdMatch[1]) {
+      return api.sendMessage(`❌ | "${query}" ke liye koi video nahi mila.`, event.threadID);
+    }
 
-    // Uzair Rajput API Setup
-    const apiBase = type === "video" 
-      ? `https://uzairrajputapis.qzz.io/api/downloader/youtube` 
-      : `https://uzairrajputapis.qzz.io/api/downloader/ytmp3`;
+    const videoId = videoIdMatch[1];
+    const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-    api.setMessageReaction("⌛", event.messageID, () => {}, true);
+    // 2. Using Uzair Rajput API for downloading
+    const apiUrl = `https://uzairrajputapis.qzz.io/api/downloader/youtube?url=${encodeURIComponent(youtubeUrl)}`;
+    const res = await axios.get(apiUrl);
 
-    // 405 Method Not Allowed fix ke liye headers aur params
-    const res = await axios.get(apiBase, {
-      params: { url: videoUrl },
-      headers: { 'User-Agent': 'Mozilla/5.0' }
+    if (!res.data || !res.data.audio) {
+      return api.sendMessage(`❌ | Gaane ka MP3 link prapt nahi ho saka.`, event.threadID);
+    }
+
+    const title = res.data.title || "audio";
+    const downloadUrl = res.data.audio;
+
+    await api.editMessage(`🎵 | "${title}" download kiya ja raha hai...`, searching.messageID);
+
+    // 3. File downloading and sending
+    const cacheDir = path.join(__dirname, "cache");
+    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
+
+    const filePath = path.resolve(cacheDir, `${Date.now()}.mp3`);
+    
+    const response = await axios.get(downloadUrl, { responseType: "stream" });
+    const writer = fs.createWriteStream(filePath);
+    response.data.pipe(writer);
+
+    writer.on("finish", async () => {
+      await api.sendMessage({
+        body: `🎶 | Here's your song: "${title}"\n\nOwner: Shaan Khan`,
+        attachment: fs.createReadStream(filePath)
+      }, event.threadID);
+      
+      fs.unlinkSync(filePath);
+      api.unsendMessage(searching.messageID);
     });
 
-    const result = res.data.result;
-    const downloadUrl = result?.download_url || result?.link || res.data.link;
-
-    if (!downloadUrl) throw new Error("Download link invalid hai.");
-
-    const ext = type === "video" ? "mp4" : "mp3";
-    const cacheDir = path.join(__dirname, "cache");
-    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
-
-    const filePath = path.join(cacheDir, `${Date.now()}.${ext}`);
-
-    const file = fs.createWriteStream(filePath);
-    https.get(downloadUrl, (response) => {
-      response.pipe(file);
-      file.on("finish", async () => {
-        file.close();
-        api.setMessageReaction("✅", event.messageID, () => {}, true);
-
-        await api.sendMessage({
-          body: `🎵 Title: ${video.title}\n📺 Type: ${type.toUpperCase()}\n\n»»𝑶𝑾𝑵𝑬𝑹««★™ »»𝑺𝑯𝑨𝑨𝑵 𝑲𝑯𝑨𝑵««`,
-          attachment: fs.createReadStream(filePath)
-        }, event.threadID, () => {
-          if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-          api.unsendMessage(processingMsg.messageID);
-        }, event.messageID);
-      });
+    writer.on("error", async (err) => {
+      console.error(err);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      api.sendMessage(`❌ | Download ke dauran truti (error) hui.`, event.threadID);
     });
 
   } catch (error) {
-    api.sendMessage(`❌ Error: ${error.message}`, event.threadID);
-    api.unsendMessage(processingMsg.messageID);
+    console.error(error);
+    api.sendMessage(`❌ | Kuch gadbad ho gayi: ${error.message}`, event.threadID);
   }
 };
