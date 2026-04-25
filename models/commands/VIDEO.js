@@ -5,10 +5,10 @@ const ytSearch = require("yt-search");
 
 module.exports.config = {
   name: "vid",
-  version: "4.2.3",
+  version: "4.2.4",
   hasPermission: 0,
   credits: "Shaan Khan + Fixed",
-  description: "YouTube se video download karne ke liye",
+  description: "YouTube video by URL or Query",
   usePrefix: false,
   commandCategory: "Media",
   cooldowns: 10
@@ -17,34 +17,36 @@ module.exports.config = {
 module.exports.run = async function ({ api, event, args }) {
   if (!args[0]) {
     return api.sendMessage(
-      "❌ | Video ka naam ya YouTube link dein.",
+      "❌ | Video ka naam ya YouTube URL dein.",
       event.threadID
     );
   }
 
   try {
-    const query = args.join(" ");
-    let youtubeUrl;
+    const input = args.join(" ").trim();
+    let youtubeUrl = "";
     let videoTitle = "Video";
 
-    const msg = await api.sendMessage(
+    const waitMsg = await api.sendMessage(
       "✅ Apki Request Jari Hai Please Wait...",
       event.threadID
     );
 
+    // URL CHECK
     const isUrl =
-      /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//i.test(query);
+      /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//i.test(input);
 
     if (isUrl) {
-      youtubeUrl = query.startsWith("http")
-        ? query
-        : "https://" + query;
+      youtubeUrl = input.startsWith("http")
+        ? input
+        : "https://" + input;
     } else {
-      const search = await ytSearch(query);
+      // QUERY SEARCH
+      const search = await ytSearch(input);
 
       if (!search.videos.length) {
         return api.sendMessage(
-          "❌ | Video nahi mili.",
+          "❌ | Is naam se video nahi mili.",
           event.threadID
         );
       }
@@ -53,13 +55,11 @@ module.exports.run = async function ({ api, event, args }) {
       videoTitle = search.videos[0].title;
     }
 
-    // 405 FIX = GET METHOD ONLY
+    // API CALL (URL + QUERY dono chalega kyunki final youtubeUrl ban gaya)
     const apiUrl =
       `https://uzairrajputapis.qzz.io/api/downloader/youtube?url=${encodeURIComponent(youtubeUrl)}`;
 
-    const res = await axios({
-      method: "GET",
-      url: apiUrl,
+    const res = await axios.get(apiUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0",
         "Accept": "application/json"
@@ -75,22 +75,22 @@ module.exports.run = async function ({ api, event, args }) {
       data?.result?.url ||
       data?.result?.mp4;
 
-    if (!downloadUrl) {
-      return api.sendMessage(
-        "❌ | Video link nahi mili API se.",
-        event.threadID
-      );
-    }
-
     if (data?.result?.title) {
       videoTitle = data.result.title;
     }
 
-    const cache = path.join(__dirname, "cache");
-    if (!fs.existsSync(cache)) fs.mkdirSync(cache);
+    if (!downloadUrl) {
+      return api.sendMessage(
+        "❌ | Download link nahi mili.",
+        event.threadID
+      );
+    }
+
+    const cacheDir = path.join(__dirname, "cache");
+    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
 
     const filePath = path.join(
-      cache,
+      cacheDir,
       `${Date.now()}.mp4`
     );
 
@@ -108,8 +108,7 @@ module.exports.run = async function ({ api, event, args }) {
       writer.on("error", reject);
     });
 
-    const stats = fs.statSync(filePath);
-    const sizeMB = stats.size / 1024 / 1024;
+    const sizeMB = fs.statSync(filePath).size / 1024 / 1024;
 
     if (sizeMB > 20) {
       fs.unlinkSync(filePath);
@@ -129,8 +128,8 @@ module.exports.run = async function ({ api, event, args }) {
       () => {
         try {
           fs.unlinkSync(filePath);
-          api.unsendMessage(msg.messageID);
-        } catch (e) {}
+          api.unsendMessage(waitMsg.messageID);
+        } catch (_) {}
       }
     );
 
@@ -138,7 +137,7 @@ module.exports.run = async function ({ api, event, args }) {
     console.log(err.response?.data || err.message);
 
     api.sendMessage(
-      `❌ Error: ${err.response?.status || ""} ${err.message}`,
+      `❌ Error: ${err.message}`,
       event.threadID
     );
   }
