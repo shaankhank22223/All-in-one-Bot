@@ -5,7 +5,7 @@ const ytSearch = require("yt-search");
 
 module.exports.config = {
   name: "vid",
-  version: "4.2.2",
+  version: "4.2.3",
   hasPermission: 0,
   credits: "Shaan Khan + Fixed",
   description: "YouTube se video download karne ke liye",
@@ -14,161 +14,131 @@ module.exports.config = {
   cooldowns: 10
 };
 
-const triggerWords = ["pika", "bot", "shankar"];
-const keywordMatchers = ["video", "dikhao", "play", "chalao", "lagao", "clip"];
-
-module.exports.handleEvent = async function ({ api, event }) {
-  let message = event.body?.toLowerCase();
-  if (!message) return;
-
-  const foundTrigger = triggerWords.find(trigger =>
-    message.startsWith(trigger)
-  );
-  if (!foundTrigger) return;
-
-  let content = message.slice(foundTrigger.length).trim();
-  if (!content) return;
-
-  const words = content.split(/\s+/);
-
-  const keywordIndex = words.findIndex(word =>
-    keywordMatchers.includes(word)
-  );
-
-  if (keywordIndex === -1 || keywordIndex === words.length - 1) return;
-
-  let possibleVideoWords = words.slice(keywordIndex + 1);
-  possibleVideoWords = possibleVideoWords.filter(
-    word => !keywordMatchers.includes(word)
-  );
-
-  const videoName = possibleVideoWords.join(" ").trim();
-  if (!videoName) return;
-
-  module.exports.run({
-    api,
-    event,
-    args: videoName.split(" ")
-  });
-};
-
 module.exports.run = async function ({ api, event, args }) {
   if (!args[0]) {
     return api.sendMessage(
-      `❌ | Please video ka naam ya link likhen!`,
+      "❌ | Video ka naam ya YouTube link dein.",
       event.threadID
     );
   }
 
   try {
     const query = args.join(" ");
-    const isUrl =
-      /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//i.test(query);
-
     let youtubeUrl;
     let videoTitle = "Video";
 
-    const searchingMsg = await api.sendMessage(
-      `✅ Apki Request Jari Hai Please Wait...`,
+    const msg = await api.sendMessage(
+      "✅ Apki Request Jari Hai Please Wait...",
       event.threadID
     );
+
+    const isUrl =
+      /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//i.test(query);
 
     if (isUrl) {
       youtubeUrl = query.startsWith("http")
         ? query
-        : `https://${query}`;
+        : "https://" + query;
     } else {
-      const searchResult = await ytSearch(query);
+      const search = await ytSearch(query);
 
-      if (!searchResult.videos.length) {
+      if (!search.videos.length) {
         return api.sendMessage(
-          `❌ | Video nahi mili.`,
+          "❌ | Video nahi mili.",
           event.threadID
         );
       }
 
-      youtubeUrl = searchResult.videos[0].url;
-      videoTitle = searchResult.videos[0].title;
+      youtubeUrl = search.videos[0].url;
+      videoTitle = search.videos[0].title;
     }
 
-    // FIXED API
+    // 405 FIX = GET METHOD ONLY
     const apiUrl =
       `https://uzairrajputapis.qzz.io/api/downloader/youtube?url=${encodeURIComponent(youtubeUrl)}`;
 
-    const { data } = await axios.get(apiUrl, {
+    const res = await axios({
+      method: "GET",
+      url: apiUrl,
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json"
+      },
       timeout: 60000
     });
+
+    const data = res.data;
 
     const downloadUrl =
       data?.result?.["360p"] ||
       data?.result?.downloadUrl ||
-      data?.result?.url;
+      data?.result?.url ||
+      data?.result?.mp4;
 
     if (!downloadUrl) {
       return api.sendMessage(
-        `❌ | Download link nahi mili.`,
+        "❌ | Video link nahi mili API se.",
         event.threadID
       );
     }
 
-    const cacheDir = path.join(__dirname, "cache");
-    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
+    if (data?.result?.title) {
+      videoTitle = data.result.title;
+    }
+
+    const cache = path.join(__dirname, "cache");
+    if (!fs.existsSync(cache)) fs.mkdirSync(cache);
 
     const filePath = path.join(
-      cacheDir,
+      cache,
       `${Date.now()}.mp4`
     );
 
-    const response = await axios({
-      url: downloadUrl,
+    const video = await axios({
       method: "GET",
+      url: downloadUrl,
       responseType: "stream",
       timeout: 180000
     });
 
     await new Promise((resolve, reject) => {
       const writer = fs.createWriteStream(filePath);
-      response.data.pipe(writer);
+      video.data.pipe(writer);
       writer.on("finish", resolve);
       writer.on("error", reject);
     });
 
     const stats = fs.statSync(filePath);
-    const sizeMB = stats.size / (1024 * 1024);
+    const sizeMB = stats.size / 1024 / 1024;
 
-    // NOW LIMIT = 20MB
     if (sizeMB > 20) {
       fs.unlinkSync(filePath);
 
-      try {
-        api.unsendMessage(searchingMsg.messageID);
-      } catch (_) {}
-
       return api.sendMessage(
-        `⚠️ Server busy hai ya file size 20MB se zyada hai.`,
+        "⚠️ File size 20MB se zyada hai.",
         event.threadID
       );
     }
 
     api.sendMessage(
       {
-        body: `🖤 ${videoTitle}\n\n𝒀𝑬 𝑳𝑶 𝑩𝑨𝑩𝒀 𝑨𝑷𝑲𝑰 👉 VIDEO`,
+        body: `🖤 ${videoTitle}\n\nYE LO BABY APKI VIDEO`,
         attachment: fs.createReadStream(filePath)
       },
       event.threadID,
       () => {
-        fs.unlinkSync(filePath);
-
         try {
-          api.unsendMessage(searchingMsg.messageID);
-        } catch (_) {}
+          fs.unlinkSync(filePath);
+          api.unsendMessage(msg.messageID);
+        } catch (e) {}
       }
     );
+
   } catch (err) {
-    console.log(err);
+    console.log(err.response?.data || err.message);
 
     api.sendMessage(
-      `❌ Error: ${err.message}`,
+      `❌ Error: ${err.response?.status || ""} ${err.message}`,
       event.threadID
     );
   }
