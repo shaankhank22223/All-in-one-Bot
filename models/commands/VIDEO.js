@@ -1,53 +1,175 @@
+const fs = require("fs");
+const path = require("path");
+const axios = require("axios");
+const ytSearch = require("yt-search");
+
 module.exports.config = {
-    name: "video",
-    version: "1.0.1",
-    hasPermssion: 0,
-    credits: "Shaan Khan",
-    description: "YouTube video download karein (Uzair Rajput API)",
-    commandCategory: "utility",
-    usages: "[video link]",
-    cooldowns: 5
+  name: "vid",
+  version: "4.2.2",
+  hasPermission: 0,
+  credits: "Shaan Khan + Fixed",
+  description: "YouTube se video download karne ke liye",
+  usePrefix: false,
+  commandCategory: "Media",
+  cooldowns: 10
 };
 
-module.exports.run = async function({ api, event, args }) {
-    const axios = require("axios");
-    const fs = require("fs-extra");
+const triggerWords = ["pika", "bot", "shankar"];
+const keywordMatchers = ["video", "dikhao", "play", "chalao", "lagao", "clip"];
 
-    const link = args[0];
-    if (!link) return api.sendMessage("Kripya YouTube video ka link dein!", event.threadID, event.messageID);
+module.exports.handleEvent = async function ({ api, event }) {
+  let message = event.body?.toLowerCase();
+  if (!message) return;
 
-    const path = __dirname + `/cache/${event.senderID}_vid.mp4`;
+  const foundTrigger = triggerWords.find(trigger =>
+    message.startsWith(trigger)
+  );
+  if (!foundTrigger) return;
 
-    try {
-        api.sendMessage("📥 Video fetch ki ja rahi hai, thoda intezar karein...", event.threadID, event.messageID);
+  let content = message.slice(foundTrigger.length).trim();
+  if (!content) return;
 
-        // API Call
-        const res = await axios.get(`https://uzair-rajput-mtx-api.onrender.com/download/ytmp4?url=${encodeURIComponent(link)}`);
-        
-        // API response se download link nikalna (Assuming the API returns { result: { download_url: "..." } })
-        // Note: Agar API ka structure alag hai toh niche 'data.download_url' ko change karein.
-        const downloadUrl = res.data.download_url || res.data.result;
+  const words = content.split(/\s+/);
 
-        if (!downloadUrl) {
-            return api.sendMessage("API se download link nahi mil saka.", event.threadID, event.messageID);
-        }
+  const keywordIndex = words.findIndex(word =>
+    keywordMatchers.includes(word)
+  );
 
-        // File download process
-        const vidData = (await axios.get(downloadUrl, { responseType: "arraybuffer" })).data;
-        fs.writeFileSync(path, Buffer.from(vidData, "utf-8"));
+  if (keywordIndex === -1 || keywordIndex === words.length - 1) return;
 
-        // Messenger limit check (25MB)
-        if (fs.statSync(path).size > 26214400) {
-            return api.sendMessage("File 25MB se badi hai, Messenger par send nahi ho sakti.", event.threadID, () => fs.unlinkSync(path), event.messageID);
-        }
+  let possibleVideoWords = words.slice(keywordIndex + 1);
+  possibleVideoWords = possibleVideoWords.filter(
+    word => !keywordMatchers.includes(word)
+  );
 
-        api.sendMessage({
-            body: "✅ Aapki video taiyar hai!",
-            attachment: fs.createReadStream(path)
-        }, event.threadID, () => fs.unlinkSync(path), event.messageID);
+  const videoName = possibleVideoWords.join(" ").trim();
+  if (!videoName) return;
 
-    } catch (error) {
-        console.error(error);
-        return api.sendMessage("Kuch galat hua ya API down hai. Dubara koshish karein.", event.threadID, event.messageID);
+  module.exports.run({
+    api,
+    event,
+    args: videoName.split(" ")
+  });
+};
+
+module.exports.run = async function ({ api, event, args }) {
+  if (!args[0]) {
+    return api.sendMessage(
+      `❌ | Please video ka naam ya link likhen!`,
+      event.threadID
+    );
+  }
+
+  try {
+    const query = args.join(" ");
+    const isUrl =
+      /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//i.test(query);
+
+    let youtubeUrl;
+    let videoTitle = "Video";
+
+    const searchingMsg = await api.sendMessage(
+      `✅ Apki Request Jari Hai Please Wait...`,
+      event.threadID
+    );
+
+    if (isUrl) {
+      youtubeUrl = query.startsWith("http")
+        ? query
+        : `https://${query}`;
+    } else {
+      const searchResult = await ytSearch(query);
+
+      if (!searchResult.videos.length) {
+        return api.sendMessage(
+          `❌ | Video nahi mili.`,
+          event.threadID
+        );
+      }
+
+      youtubeUrl = searchResult.videos[0].url;
+      videoTitle = searchResult.videos[0].title;
     }
+
+    // FIXED API
+    const apiUrl =
+      `https://uzairrajputapis.qzz.io/api/downloader/youtube?url=${encodeURIComponent(youtubeUrl)}`;
+
+    const { data } = await axios.get(apiUrl, {
+      timeout: 60000
+    });
+
+    const downloadUrl =
+      data?.result?.["360p"] ||
+      data?.result?.downloadUrl ||
+      data?.result?.url;
+
+    if (!downloadUrl) {
+      return api.sendMessage(
+        `❌ | Download link nahi mili.`,
+        event.threadID
+      );
+    }
+
+    const cacheDir = path.join(__dirname, "cache");
+    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
+
+    const filePath = path.join(
+      cacheDir,
+      `${Date.now()}.mp4`
+    );
+
+    const response = await axios({
+      url: downloadUrl,
+      method: "GET",
+      responseType: "stream",
+      timeout: 180000
+    });
+
+    await new Promise((resolve, reject) => {
+      const writer = fs.createWriteStream(filePath);
+      response.data.pipe(writer);
+      writer.on("finish", resolve);
+      writer.on("error", reject);
+    });
+
+    const stats = fs.statSync(filePath);
+    const sizeMB = stats.size / (1024 * 1024);
+
+    // NOW LIMIT = 20MB
+    if (sizeMB > 20) {
+      fs.unlinkSync(filePath);
+
+      try {
+        api.unsendMessage(searchingMsg.messageID);
+      } catch (_) {}
+
+      return api.sendMessage(
+        `⚠️ Server busy hai ya file size 20MB se zyada hai.`,
+        event.threadID
+      );
+    }
+
+    api.sendMessage(
+      {
+        body: `🖤 ${videoTitle}\n\n𝒀𝑬 𝑳𝑶 𝑩𝑨𝑩𝒀 𝑨𝑷𝑲𝑰 👉 VIDEO`,
+        attachment: fs.createReadStream(filePath)
+      },
+      event.threadID,
+      () => {
+        fs.unlinkSync(filePath);
+
+        try {
+          api.unsendMessage(searchingMsg.messageID);
+        } catch (_) {}
+      }
+    );
+  } catch (err) {
+    console.log(err);
+
+    api.sendMessage(
+      `❌ Error: ${err.message}`,
+      event.threadID
+    );
+  }
 };
