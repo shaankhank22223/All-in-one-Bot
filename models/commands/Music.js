@@ -5,10 +5,10 @@ const ytSearch = require("yt-search");
 
 module.exports.config = {
   name: "video",
-  version: "4.5.0",
+  version: "4.2.1",
   hasPermission: 0,
-  credits: "Shaan Khan",
-  description: "YouTube video downloader via QZZ API",
+  credits: "Shaan Khan + Fixed",
+  description: "YouTube se video download karne ke liye",
   usePrefix: false,
   commandCategory: "Media",
   cooldowns: 10
@@ -28,94 +28,174 @@ module.exports.handleEvent = async function ({ api, event }) {
   if (!content) return;
 
   const words = content.split(/\s+/);
-  const keywordIndex = words.findIndex(word => keywordMatchers.includes(word));
+
+  const keywordIndex = words.findIndex(word =>
+    keywordMatchers.includes(word)
+  );
+
   if (keywordIndex === -1 || keywordIndex === words.length - 1) return;
 
   let possibleVideoWords = words.slice(keywordIndex + 1);
-  possibleVideoWords = possibleVideoWords.filter(word => !keywordMatchers.includes(word));
+  possibleVideoWords = possibleVideoWords.filter(
+    word => !keywordMatchers.includes(word)
+  );
 
   const videoName = possibleVideoWords.join(" ").trim();
   if (!videoName) return;
 
-  module.exports.run({ api, event, args: videoName.split(" ") });
+  module.exports.run({
+    api,
+    event,
+    args: videoName.split(" ")
+  });
 };
 
 module.exports.run = async function ({ api, event, args }) {
-  if (!args[0]) return api.sendMessage(`❌ | Please video ka naam ya link likhen!`, event.threadID);
+  if (!args[0]) {
+    return api.sendMessage(
+      `❌ | Please video ka naam ya link likhen!`,
+      event.threadID
+    );
+  }
 
   try {
     const query = args.join(" ");
-    const isUrl = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//i.test(query);
+
+    const isUrl =
+      /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\//i.test(query);
 
     let youtubeUrl;
-    let videoTitle = "Video";
-    let searchingMsg = await api.sendMessage(`✅ Apki Request Jari Hai Please Wait...`, event.threadID);
+    let videoTitle;
+    let searchingMsg;
+
+    searchingMsg = await api.sendMessage(
+      `✅ Apki Request Jari Hai Please Wait...`,
+      event.threadID
+    );
 
     if (isUrl) {
-      youtubeUrl = query.startsWith("http") ? query : `https://${query}`;
+      youtubeUrl = query.startsWith("http")
+        ? query
+        : `https://${query}`;
+      videoTitle = "Video";
     } else {
       const searchResult = await ytSearch(query);
+
       if (!searchResult || !searchResult.videos.length) {
-        return api.sendMessage(`❌ | "${query}" ke liye koi video nahi mili.`, event.threadID);
+        return api.sendMessage(
+          `❌ | "${query}" ke liye koi video nahi mili.`,
+          event.threadID
+        );
       }
-      youtubeUrl = searchResult.videos[0].url;
-      videoTitle = searchResult.videos[0].title;
+
+      const video = searchResult.videos[0];
+      youtubeUrl = video.url;
+      videoTitle = video.title;
     }
 
-    // Naya API URL Fix
-    const apiUrl = `https://uzairrajputapis.qzz.io/api/downloader/youtube?url=${encodeURIComponent(youtubeUrl)}`;
+    // FIXED ENDPOINT
+    const apiUrl =
+      `https://uzairrajputapis.qzz.io/api/downloader/youtube?url=${encodeURIComponent(youtubeUrl)}`;
 
-    const res = await axios.get(apiUrl, { timeout: 60000 });
+    const res = await axios.get(apiUrl, {
+      timeout: 60000
+    });
+
     const result = res.data;
 
-    // API Response Extraction Logic
-    const downloadUrl = result?.result?.downloadUrl || result?.result?.download_url || result?.data?.videoUrl || result?.result?.url;
-    const apiTitle = result?.result?.title || result?.data?.title;
-    
+    const downloadUrl =
+      result?.result?.["360p"] ||
+      result?.result?.downloadUrl ||
+      result?.result?.download_url ||
+      result?.result?.url ||
+      result?.videoUrl;
+
+    const apiTitle =
+      result?.result?.title ||
+      result?.data?.title;
+
     if (apiTitle) videoTitle = apiTitle;
 
     if (!downloadUrl) {
-      return api.sendMessage(`❌ | Video link fetch nahi ho saka. API down ho sakti hai.`, event.threadID);
+      return api.sendMessage(
+        `❌ | Video link nikalne mein masla ho raha hai.`,
+        event.threadID
+      );
     }
 
     const cacheDir = path.resolve(__dirname, "cache");
-    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
-    const filePath = path.join(cacheDir, `${Date.now()}.mp4`);
+    if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir);
+
+    const filePath = path.join(
+      cacheDir,
+      `${Date.now()}.mp4`
+    );
 
     const response = await axios.get(downloadUrl, {
       responseType: "stream",
-      timeout: 300000,
-      headers: { "User-Agent": "Mozilla/5.0" }
+      timeout: 180000,
+      maxRedirects: 5,
+      headers: {
+        "User-Agent": "Mozilla/5.0"
+      }
     });
 
-    const writer = fs.createWriteStream(filePath);
-    response.data.pipe(writer);
-
     await new Promise((resolve, reject) => {
+      const writer = fs.createWriteStream(filePath);
+
+      response.data.pipe(writer);
+      response.data.on("error", reject);
+      writer.on("error", reject);
       writer.on("finish", resolve);
-      writer.on("error", (err) => {
-        fs.unlinkSync(filePath);
-        reject(err);
-      });
     });
 
     const stat = fs.statSync(filePath);
-    if (stat.size < 1000) {
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      return api.sendMessage(`❌ | File download error: File size bohot kam hai.`, event.threadID);
+
+    if (!stat.size || stat.size < 5000) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (_) {}
+
+      return api.sendMessage(
+        `❌ | Download error. Dubara try karein.`,
+        event.threadID
+      );
     }
 
-    // Final Delivery
-    api.sendMessage({
-      body: `🖤 ${videoTitle}\n»»𝑶𝑾𝑵𝑬𝑹««★™ »»𝑺𝑯𝑨𝑨𝑵 𝑲𝑯𝑨𝑵««🥀\n𝒀𝑬 𝑳𝑶 𝑩𝑨𝑩𝒀 𝑨𝑷𝑲𝑰 👉 VIDEO`,
-      attachment: fs.createReadStream(filePath)
-    }, event.threadID, () => {
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      api.unsendMessage(searchingMsg.messageID).catch(() => {});
-    });
+    api.sendMessage(
+      {
+        body: `🖤${videoTitle}
 
+»»𝑶𝑾𝑵𝑬𝑹««★™
+»»𝑺𝑯𝑨𝑨𝑵 𝑲𝑯𝑨𝑵««🥀
+
+𝒀𝑬 𝑳𝑶 𝑩𝑨𝑩𝒀 𝑨𝑷𝑲𝑰 👉 VIDEO`,
+        attachment: fs.createReadStream(filePath)
+      },
+      event.threadID,
+      (err) => {
+        try {
+          fs.unlinkSync(filePath);
+        } catch (_) {}
+
+        try {
+          api.unsendMessage(searchingMsg.messageID);
+        } catch (_) {}
+
+        if (err) {
+          api.sendMessage(
+            `⚠️ | Video send fail: ${err.message}`,
+            event.threadID
+          );
+        }
+      }
+    );
   } catch (error) {
-    console.error("API Error:", error.message);
-    api.sendMessage(`❌ | API Error: ${error.message}`, event.threadID);
+    console.error(error);
+
+    api.sendMessage(
+      `❌ | Error: ${error.message}`,
+      event.threadID
+    );
   }
 };
