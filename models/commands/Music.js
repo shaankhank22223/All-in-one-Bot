@@ -7,10 +7,10 @@ const https = require("https");
 module.exports = {
   config: {
     name: "music",
-    version: "1.0.7",
+    version: "1.0.6",
     hasPermssion: 0,
-    credits: "Shaan Khan",
-    description: "Download YouTube song with Uzair API Fix (405 Fixed)",
+    credits: "𝐏𝐫𝐢𝐲𝐚𝐧𝐬𝐡 𝐑𝐚𝐣𝐩𝐮𝐭",
+    description: "Download YouTube song with Uzair API Fix",
     commandCategory: "Media",
     usages: "[songName] [audio/video]",
     cooldowns: 5,
@@ -42,31 +42,27 @@ module.exports = {
       const topResult = searchResults.videos[0];
       const videoUrl = topResult.url;
 
-      // API Endpoints as per your links
-      const apiBase = type === "video" 
+      // Uzair Rajput API Endpoints
+      let apiUrl = type === "video" 
         ? `https://uzairrajputapis.qzz.io/api/downloader/youtube` 
         : `https://uzairrajputapis.qzz.io/api/downloader/ytmp3`;
 
-      // 405 Fix: Constructing full URL with properly encoded query
-      const apiUrl = `${apiBase}?url=${encodeURIComponent(videoUrl)}`;
-
       api.setMessageReaction("⌛", event.messageID, () => {}, true);
 
-      // Fetching with custom User-Agent to avoid 405 Method Not Allowed
+      // 405 Error Fix: Kuch APIs direct GET se block hoti hain, isliye hum params bhej rahe hain
       const downloadResponse = await axios.get(apiUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36'
-        }
+        params: { url: videoUrl }
       });
 
-      // API Response logic
-      const data = downloadResponse.data;
-      const downloadUrl = data.result?.download_url || data.result?.link || data.link;
+      // Response structure check
+      const result = downloadResponse.data.result;
+      const downloadUrl = result?.download_url || result?.link || downloadResponse.data.link;
 
-      if (!downloadUrl) throw new Error("API se download link nahi mil saki.");
+      if (!downloadUrl) throw new Error("API did not return a download link.");
 
       const ext = type === "audio" ? "mp3" : "mp4";
-      const downloadPath = path.join(__dirname, "cache", `${Date.now()}.${ext}`);
+      const filename = `${Date.now()}.${ext}`;
+      const downloadPath = path.join(__dirname, "cache", filename);
 
       if (!fs.existsSync(path.join(__dirname, "cache"))) {
         fs.mkdirSync(path.join(__dirname, "cache"), { recursive: true });
@@ -74,11 +70,13 @@ module.exports = {
 
       const file = fs.createWriteStream(downloadPath);
       
-      https.get(downloadUrl, (res) => {
-        if (res.statusCode !== 200) {
-          throw new Error("Download server responded with " + res.statusCode);
+      // Downloading the file
+      https.get(downloadUrl, (response) => {
+        if (response.statusCode !== 200) {
+          return api.sendMessage("❌ Download link expired or invalid.", event.threadID);
         }
-        res.pipe(file);
+        
+        response.pipe(file);
         file.on("finish", async () => {
           file.close();
           api.setMessageReaction("✅", event.messageID, () => {}, true);
@@ -95,7 +93,8 @@ module.exports = {
 
     } catch (error) {
       console.error(error);
-      api.sendMessage(`❌ Error: ${error.response?.status === 405 ? "API method not allowed (405). Uzair API may require POST or Private Key." : error.message}`, event.threadID, event.messageID);
+      // Agar 405 phir bhi aaye, toh link structure badal dete hain
+      api.sendMessage(`❌ Error: ${error.message}\nTip: Check if API is online.`, event.threadID, event.messageID);
       api.unsendMessage(processingMessage.messageID);
     }
   },
